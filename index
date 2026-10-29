@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Récupération BL</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: Arial, sans-serif; padding: 12px; background: #f5f5f5; }
+  button { width: 100%; padding: 14px; margin: 6px 0; font-size: 1em; font-weight: bold; border: 0; border-radius: 8px; color: #fff; background: #7C2270; cursor: pointer; }
+  button.vert { background: #16a34a; }
+  button:active { opacity: 0.9; }
+  pre { background: #fff; padding: 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; font-size: 0.85em; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<h3>📦 Récupération des BL de ce téléphone</h3>
+<button onclick="afficher()">1. Lire les sauvegardes</button>
+<button class="vert" onclick="envoyer()">2. Envoyer sur Telegram</button>
+<button onclick="copier()">Copier le texte</button>
+<pre id="sortie">Appuie sur « Lire les sauvegardes ».</pre>
+
+<script>
+const client = supabase.createClient(
+  "https://thbqkeugjvsxbryfnzuo.supabase.co",
+  "sb_publishable_2-Ij-nrTPeK6rB-kSD-QTg_b42zNakq"
+);
+
+function collecter() {
+  const lignes = [];
+  const identiteBrute = localStorage.getItem("fbm_identite_redacteur");
+  let identite = {};
+  try { identite = JSON.parse(identiteBrute || "{}"); } catch(e) {}
+  
+  lignes.push("Agent : " + ((identite.prenom || "") + " " + (identite.nom || "")).trim());
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    const brut = localStorage.getItem(k);
+    if (!brut) continue;
+
+    try {
+      if (k.startsWith("fbm_bls_")) {
+        const liste = JSON.parse(brut);
+        if (!Array.isArray(liste) || !liste.length) continue;
+        lignes.push("\n[" + k.replace("fbm_bls_", "") + "]");
+        liste.forEach(b => lignes.push(
+          "BL " + (b.bl || "?") + " | " + (b.type || "?") + " | " +
+          (b.quantite_beton ?? "?") + " m3 | slump " + (b.slump ?? "?") + " " + (b.classe_slump || "") +
+          (b.destination === "carotte" ? " | CAROTTE" : "")
+        ));
+      } else if (k.startsWith("fbm_dernier_bl_")) {
+        const d = JSON.parse(brut);
+        if (d && d.bl) {
+          lignes.push("\n[Dernier BL " + k.replace("fbm_dernier_bl_", "") + "] " + d.bl + " | " + (d.type || "?") + " | " + (d.quantite_beton || "?") + " m3 | slump " + (d.slump || "?"));
+        }
+      } else if (k === "fbm_historique_numeros_bl") {
+        const hist = JSON.parse(brut);
+        if (Array.isArray(hist)) {
+          lignes.push("\n[Historique des N° BL] " + hist.join(", "));
+        }
+      } else if (k === "fbm_outil_2_etat_v1") {
+        const parsed = JSON.parse(brut);
+        const c = (parsed && parsed.champs) || {};
+        const bl = c.bl_beton && c.bl_beton.value;
+        if (bl) {
+          lignes.push("\n[Saisie en cours] N° BL : " + bl + " | type : " + ((c["bl-input"] || {}).value || "") +
+           " | qté : " + ((c["quantite-beton-input"] || {}).value || "") + " | slump : " + ((c["slump-input"] || {}).value || ""));
+        }
+      } else if (k.startsWith("fbm_save_")) {
+        const d = JSON.parse(brut);
+        if (d && d.bl_beton) {
+          lignes.push("\n[Brouillon " + k.replace("fbm_save_", "") + "] N° BL : " + d.bl_beton);
+        }
+      }
+    } catch (e) {
+      // Ignore les erreurs de parsing sur les clés non conformes
+    }
+  }
+  return lignes.join("\n");
+}
+
+function afficher() {
+  const t = collecter();
+  document.getElementById("sortie").textContent = (t.split("\n").length <= 1 || t.trim() === "Agent :") 
+    ? "Aucune sauvegarde BL trouvée sur ce téléphone." 
+    : t;
+}
+
+async function envoyer() {
+  const texte = collecter();
+  if (texte.split("\n").length <= 1 || texte.trim() === "Agent :") { 
+    alert("Rien à envoyer."); 
+    return; 
+  }
+  
+  const identiteBrute = localStorage.getItem("fbm_identite_redacteur");
+  let identite = {};
+  try { identite = JSON.parse(identiteBrute || "{}"); } catch(e) {}
+
+  const morceaux = texte.match(/[\s\S]{1,3300}/g) || [texte];
+  try {
+    for (const m of morceaux) {
+      const { error } = await client.from("remarques").insert([{
+        app: "RECUP_BL",
+        nom: identite.nom || "ANONYME",
+        prenom: identite.prenom || "",
+        remarque: m
+      }]);
+      if (error) throw error;
+    }
+    alert("✅ Envoyé (" + morceaux.length + " message(s)). Vérifie Telegram.");
+  } catch (e) {
+    alert("❌ Échec : " + (e.message || e));
+  }
+}
+
+function copier() {
+  const texte = collecter();
+  navigator.clipboard.writeText(texte).then(() => alert("Copié dans le presse-papier !"), () => alert("Copie impossible"));
+}
+</script>
+</body>
+</html>
